@@ -2,7 +2,7 @@
 
 
 
-A simple BBS with Chatroom System.
+A simple BBS with Chatroom Service.
 
 ## Usage
 
