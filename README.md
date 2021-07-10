@@ -1,8 +1,8 @@
-# BBS with Chatroom System
+# BBS with Chatroom Service
 
 
 
-A simple BBS with Chatroom Service.
+A BBS with chatroom service implemented by python network programing.
 
 ## Usage
 
