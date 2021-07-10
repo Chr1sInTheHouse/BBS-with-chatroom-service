@@ -4,8 +4,6 @@
 
 A simple BBS with Chatroom System.
 
-
-
 ## Usage
 
 ---
@@ -17,8 +15,6 @@ A simple BBS with Chatroom System.
 # Start the client
 ./client [IP address] [port]
 ```
-
-
 
 ## Functions
 
@@ -37,16 +33,16 @@ A simple BBS with Chatroom System.
 
 ### Boards and Posts
 
-| Function                                                        | Description                                          |
-|:--------------------------------------------------------------- |:---------------------------------------------------- |
-| `create-board <name>`                                           | Create a board.                                      |
-| `create-post <board-name> --title <title> --content <content>`` | Create a post.                                       |
-| `list-board`                                                    | List all boards in BBS.                              |
-| `list-post <board-name>`                                        | List all posts in a board.                           |
-| `read <post-S/N>`                                               | Show the post which S/N is <post-S/N>.               |
-| `delete-post <post-S/N>`                                        | Delete the post which S/N is <post-S/N>.             |
-| `update-post <post-S/N> --title/content <new>`                  | Update the post which S/N is <post-S/N>.             |
-| `comment <post-S/N> <comment>`                                  | Leave a comment at the post which S/N is <post-S/N>. |
+| Function                                                       | Description                                          |
+|:-------------------------------------------------------------- |:---------------------------------------------------- |
+| `create-board <name>`                                          | Create a board.                                      |
+| `create-post <board-name> --title <title> --content <content>` | Create a post.                                       |
+| `list-board`                                                   | List all boards in BBS.                              |
+| `list-post <board-name>`                                       | List all posts in a board.                           |
+| `read <post-S/N>`                                              | Show the post which S/N is <post-S/N>.               |
+| `delete-post <post-S/N>`                                       | Delete the post which S/N is <post-S/N>.             |
+| `update-post <post-S/N> --title/content <new>`                 | Update the post which S/N is <post-S/N>.             |
+| `comment <post-S/N> <comment>`                                 | Leave a comment at the post which S/N is <post-S/N>. |
 
 ### Chat Room
 
