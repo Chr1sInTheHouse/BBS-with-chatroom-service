@@ -1,12 +1,12 @@
 # BBS with Chatroom System
 
----
+
 
 A simple BBS with Chatroom System.
 
 ## Usage
 
----
+
 
 ```bash
 # Start the server
@@ -18,7 +18,7 @@ A simple BBS with Chatroom System.
 
 ## Functions
 
----
+
 
 ### User Information
 
