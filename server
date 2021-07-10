@@ -1,0 +1,839 @@
+#!/bin/sh
+
+""":"
+
+# Find a suitable python interpreter (adapt for your specific needs) 
+for cmd in python3 /usr/bin/python3 ; do
+   command -v > /dev/null $cmd && exec $cmd $0 "$@"
+done
+
+echo "Python not found, exiting." >2
+
+exit 2
+
+":"""
+
+import socket
+from select import select
+from random import seed
+from random import randint
+from sys import argv
+import json
+import os
+import threading
+import pickle
+import argparse
+import time
+from datetime import date
+
+parser = argparse.ArgumentParser()
+parser.add_argument("port")
+args = parser.parse_args()
+
+HOST = ''
+PORT = int(args.port)
+
+key_list = ['usrname', 'email', 'password', 'rand_num', 'chatroom_port', 'chatroom_ip']
+# db = []
+
+# if(os.path.isfile('./db.json')==False):
+#     db_init = {'data': [], 'boards': [], 'posts': []}
+#     db_file = open('db.json', 'a+')
+#     json.dump(db_init, db_file)
+#     db_file.close()
+
+# db_file = open('./db.json', 'r')
+# db_all = json.load(db_file)
+# db_file.close()
+# db = db_all['data']
+# boards = db_all['boards']
+# posts = db_all['posts']
+db = []
+boards = []
+posts = []
+
+class Board:
+    def __init__(self, index, name, moderator):
+        self.index = index
+        self.name = name
+        self.moderator = moderator
+        self.post = []
+
+    def add_post(self, p):
+        self.post.append(p)
+
+    def del_post(self, p):
+        self.post.remove(p)
+
+    def get_board_in_line(self):
+        line = f'{self.index}   {self.name}   {self.moderator}'
+        return line
+
+
+class Post:
+    def __init__(self, sn, title, author, content):
+        self.sn = sn
+        self.title = title
+        self.author = author
+        self.date = date.today()
+        # self.content = []
+        self.comment = []
+
+        c_list = content.split('<br>')
+        self.content = c_list
+
+    def get_post_in_line(self):
+        line = f'{self.sn}   {self.title}   {self.author}  {self.date}'
+        return line
+
+    def get_post(self):
+        p = ''
+        p = p + f'Author: {self.author}\n'
+        p = p + f'Title: {self.title}\n'
+        p = p + f'Date: {self.date}\n'
+        p = p + f'--\n'
+        for con in self.content:
+            p = p + con + '\n'
+        p = p + f'--\n'
+        for com in self.comment:
+            p = p + com + '\n'
+        return p
+
+    def update_content(self, content):
+        c_list = content.split('<br>')
+        self.content = c_list
+
+def recv_and_send(client, addr):
+    data_raw = client.recv(1024)
+    data_recv = pickle.loads(data_raw)
+    data_recv['ip'] = addr[0]
+    # print(data_recv)
+    data_send = action(data_recv)
+    # test = pickle.loads(data_send)
+    # print(test)
+    client.sendall(data_send)
+    client.close()
+    # print(f"return: {data_send}")
+
+def rs_udp(data_raw, addr):
+    data_recv = pickle.loads(data_raw)
+    data_send = action(data_recv)
+    udp.sendto(data_send, addr)
+
+lock = threading.Lock()
+
+def action(data_recv):
+    if data_recv['command'] == 'register':
+        return register(data_recv)
+    elif data_recv['command'] == 'login':
+        return login(data_recv)
+    elif data_recv['command'] == 'logout':
+        return logout(data_recv)
+    elif data_recv['command'] == 'whoami':
+        return whoami(data_recv)
+    elif data_recv['command'] == 'list-user':
+        return list_user(data_recv)
+    elif data_recv['command'] == 'create-board':
+        lock.acquire()
+        ret = create_board(data_recv)
+        lock.release()
+        return ret
+    elif data_recv['command'] == 'create-post':
+        lock.acquire()
+        ret = create_post(data_recv)
+        lock.release()
+        return ret
+    elif data_recv['command'] == 'list-board':
+        lock.acquire()
+        ret = list_board(data_recv)
+        lock.release()
+        return ret
+    elif data_recv['command'] == 'list-post':
+        lock.acquire()
+        ret = list_post(data_recv)
+        lock.release()
+        return ret
+    elif data_recv['command'] == 'read':
+        lock.acquire()
+        ret = read(data_recv)
+        lock.release()
+        return ret
+    elif data_recv['command'] == 'delete-post':
+        lock.acquire()
+        ret = delete_post(data_recv)
+        lock.release()
+        return ret
+    elif data_recv['command'] == 'update-post':
+        lock.acquire()
+        ret = update_post(data_recv)
+        lock.release()
+        return ret
+    elif data_recv['command'] == 'comment':
+        lock.acquire()
+        ret = comment(data_recv)
+        lock.release()
+        return ret
+    elif data_recv['command'] == 'exit':
+        return exit(data_recv)
+    elif data_recv['command'] == 'new':
+        return new_connection(data_recv)
+
+    elif data_recv['command'] == 'create-chatroom':
+        return create_chatroom(data_recv)
+    elif data_recv['command'] == 'list-chatroom':
+        return list_chatroom(data_recv)
+    elif data_recv['command'] == 'join-chatroom':
+        return join_chatroom(data_recv)
+    elif data_recv['command'] == 'attach':
+        return attach(data_recv)
+    elif data_recv['command'] == 'restart-chatroom':
+        return restart_chatroom(data_recv)
+    elif data_recv['command'] == 'close-chatroom':
+        return close_chatroom(data_recv)
+    else:
+        msg = 'command not found.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+
+def close_chatroom(data_recv):
+    for user in db:
+        if str(user['rand_num']) == data_recv['rand']:
+            user['chatroom_port'] *= -1
+
+    return str(user['chatroom_port']).encode()
+
+
+
+def register(data_recv):
+    usrname = data_recv['usrname']
+    email = data_recv['email']
+    password = data_recv['password']
+    rand = data_recv['rand']
+    #if(rand != '-1'):
+    #    return 'Logout. Motherfucker.'
+    if(len(usrname)==0 or len(email)==0 or len(password)==0):
+        msg = 'Usage: register <username> <email> <password>'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+
+    usr_profile = {key: None for key in key_list}
+    usr_profile['usrname'] = usrname
+    usr_profile['email'] = email
+    usr_profile['password'] = password
+    usr_profile['rand_num'] = -1
+    usr_profile['chatroom_port'] = -1
+    usr_profile['chatroom_ip'] = ''
+    for usr in db:
+        if(usr['usrname']==usrname):
+            msg = 'Username is already used.'
+            ret = {}
+            ret['msg'] = msg
+            ret_raw = pickle.dumps(ret)
+            return ret_raw
+        
+    db.append(usr_profile)
+    # for i in db:
+    #     print(i)
+    msg = 'Register successfully.'
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+
+
+def login(data_recv):
+    usrname = data_recv['usrname']
+    password = data_recv['password']
+    rand = data_recv['rand']
+
+    if(len(usrname)==0 or len(password)==0):
+        msg = 'Usage: login <username> <password>'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+    if(rand != '-1'):
+        msg = 'Please logout first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+    for usr in db:
+        if(usr['usrname']==usrname and usr['password']==password):
+            usr['rand_num'] = randint(1, 1000)
+            usr['chatroom_ip'] = data_recv['ip']
+            # print(usr)
+            msg = 'Welcome, ' + usrname + '.' + '/``/`/' + str(usr['rand_num'])
+            ret = {}
+            ret['msg'] = msg
+            ret['command'] = 'login'
+            ret['username'] = usrname
+            ret_raw = pickle.dumps(ret)
+            return ret_raw
+
+    msg = 'Login failed.'
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+
+def logout(data_recv):
+    rand = data_recv['rand']
+    if(rand == '-1'):
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+                
+    for usr in db:
+        if(str(usr['rand_num'])==rand):
+            if usr['chatroom_port'] > 0:
+                msg = 'Please do “attach” and“leave-chatroom” first.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+            usr['rand_num'] = -1
+            msg = 'Bye, ' + usr['usrname'] + '/``/`/' + '-1'
+            ret = {}
+            ret['msg'] = msg
+            ret_raw = pickle.dumps(ret)
+            return ret_raw
+
+
+    msg = 'error[logout]'
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+
+
+def whoami(data_recv):
+    rand = data_recv['rand']
+    if(rand == '-1'):
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+    for usr in db:
+        if(str(usr['rand_num'])==rand):
+            msg = usr['usrname']
+            ret = {}
+            ret['msg'] = msg
+            ret_raw = pickle.dumps(ret)
+            return ret_raw
+
+    msg = 'error[whoami]'
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+
+def list_user(data_recv):
+    all_user = 'Name                  Email\n'
+    for usr in db:
+        all_user = all_user + usr['usrname'] + ' '*(22-len(usr['usrname'])) + usr['email'] + '\n'
+    msg = all_user
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+
+def exit(data_recv):
+    rand = data_recv['rand']
+    if(rand != '-1'):
+        for usr in db:
+            if(str(usr['rand_num'])==rand):
+                usr['rand_num'] = -1
+                popopo = usr['chatroom_port'] if usr['chatroom_port'] > 0 else -usr['chatroom_port']
+
+
+    for usr in db:
+        if(str(usr['rand_num'])==rand):
+            popopo = usr['chatroom_port'] if usr['chatroom_port'] > 0 else -usr['chatroom_port']
+
+    msg = 'exit' + '/``/`/-1'
+    ret = {}
+    ret['msg'] = msg
+    ret['command'] = 'exit'
+    ret['port'] = popopo
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+    
+def new_connection(data_recv):
+    print('New connection.')
+    r = '********************************\n'
+    r = r + '** Welcome to the BBS server. **\n'
+    r = r + '********************************'
+    # r = r + '/``/`/' + str(data_recv['port'])
+    msg = r
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+def create_board(data_recv):
+    global boards
+    rand = data_recv['rand']
+    if rand == '-1':
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+    
+    for b in boards:
+        if b.name == data_recv['name']:
+            msg = 'Board already exists.'
+            ret = {}
+            ret['msg'] = msg
+            ret_raw = pickle.dumps(ret)
+            return ret_raw
+
+    for user in db:
+        if str(user['rand_num']) == data_recv['rand']:
+            moderator = user['usrname']
+    
+    new_b = Board(len(boards)+1, data_recv['name'], moderator)
+    boards.append(new_b)
+    msg = 'Create board successfully.'
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+post_idx = 1
+def create_post(data_recv):
+    global post_idx, boards, posts
+    rand = data_recv['rand']
+    if rand == '-1':
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+
+    for user in db:
+        if str(user['rand_num']) == data_recv['rand']:
+            author = user['usrname']
+
+    for b in boards:
+        if b.name == data_recv['board-name']:
+            p = Post(post_idx, data_recv['title'], author, data_recv['content'])
+            posts.append(p)
+            post_idx = post_idx + 1
+            b.add_post(p.sn)
+            msg = 'Create post successfully.'
+            ret = {}
+            ret['msg'] = msg
+            ret_raw = pickle.dumps(ret)
+            return ret_raw
+    
+    msg = 'Board does not exist.'
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+def list_board(data_recv):
+    global boards
+    r = 'Index   Name   Moderator\n'
+    for b in boards:
+        r = r + b.get_board_in_line() + '\n'
+    msg = r
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+def list_post(data_recv):
+    global boards, posts
+    for b in boards:
+        if b.name == data_recv['board-name']:
+            po = 'S/N   Title   Author   Date\n'
+            for sn in b.post:
+                for p in posts:
+                    if p.sn == sn:
+                        po = po + p.get_post_in_line() + '\n'
+            msg = po
+            ret = {}
+            ret['msg'] = msg
+            ret_raw = pickle.dumps(ret)
+            return ret_raw
+
+    msg = 'Board does not exist.'
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+def read(data_recv):
+    global posts
+    for p in posts:
+        if str(p.sn) == data_recv['post-S/N']:
+            msg = p.get_post()
+            ret = {}
+            ret['msg'] = msg
+            ret_raw = pickle.dumps(ret)
+            return ret_raw
+
+    msg = 'Post does not exist.'
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+def delete_post(data_recv):
+    global posts, boards
+
+    rand = data_recv['rand']
+    if rand == '-1':
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+
+    for user in db:
+        if str(user['rand_num']) == data_recv['rand']:
+            usr = user['usrname']
+
+    for i in range(len(posts)):
+        if str(posts[i].sn) == data_recv['post-S/N']:
+            if usr != posts[i].author:
+                msg = 'Not the post owner.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+            else:
+                for b in boards:
+                    for j in b.post:
+                        if j == posts[i].sn:
+                            b.del_post(posts[i].sn)
+                del posts[i]
+                msg = 'Delete successfully.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+    msg = 'Post does not exist.'
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+def update_post(data_recv):
+    global posts
+
+    rand = data_recv['rand']
+    if rand == '-1':
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+
+    for user in db:
+        if str(user['rand_num']) == data_recv['rand']:
+            usr = user['usrname']
+
+    for p in posts:
+        if str(p.sn) == data_recv['post-S/N']:
+            if usr != p.author:
+                msg = 'Not the post owner.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+            if len(data_recv['title']) > 0:
+                p.title = data_recv['title']
+                msg = 'Update successfully.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+            if len(data_recv['content']) > 0:
+                p.update_content(data_recv['content'])
+                msg = 'Update successfully.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+    msg = 'Post does not exist.'
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+def comment(data_recv):
+    global posts
+
+    rand = data_recv['rand']
+    if rand == '-1':
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+
+    for user in db:
+        if str(user['rand_num']) == data_recv['rand']:
+            usr = user['usrname']
+
+    com = usr + ': ' + data_recv['comment']
+
+    for p in posts:
+        if str(p.sn) == data_recv['post-S/N']:
+            p.comment.append(com)
+            msg = 'Comment successfully.'
+            ret = {}
+            ret['msg'] = msg
+            ret_raw = pickle.dumps(ret)
+            return ret_raw
+    msg = 'Post does not exist.'
+    ret = {}
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+
+def create_chatroom(data_recv):
+
+    rand = data_recv['rand']
+    if rand == '-1':
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+
+    for user in db:
+        if str(user['rand_num']) == data_recv['rand']:
+            usr = user['usrname']
+            chatroom_port = user['chatroom_port']
+
+            if chatroom_port != -1:
+                msg = 'User has already created the chatroom.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+
+            user['chatroom_port'] = int(data_recv['port'])
+
+    msg = 'start to create chatroom...'
+    ret = {}
+    ret['command'] = 'create_chatroom'
+    ret['msg'] = msg
+    ret['username'] = usr
+    ret['port'] = data_recv['port']
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+
+def list_chatroom(data_recv):
+
+    rand = data_recv['rand']
+    if rand == '-1':
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+
+    all_room = 'Chatroom_name   Status\n'
+    for user in db:
+        if user['chatroom_port'] != -1:
+            all_room = all_room + user['usrname'] + ' '*(16-len(user['usrname']))
+            if user['chatroom_port'] < 0:
+                all_room = all_room + 'close' + '\n'
+            else:
+                all_room = all_room + 'open' + '\n'
+    msg = all_room
+    ret = {}
+    ret['command'] = 'list_chatroom'
+    ret['msg'] = msg
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+    
+def join_chatroom(data_recv):
+
+    rand = data_recv['rand']
+    if rand == '-1':
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+
+    for user in db:
+        if user['usrname'] == data_recv['chatroom_name']:
+            if user['chatroom_port'] <= 0:
+                msg = 'The chatroom does not exist or the chatroom is close.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+            
+            ip = user['chatroom_ip']
+            port = user['chatroom_port']
+
+
+    ret = {}
+    ret['msg'] = ''
+    ret['command'] = 'join_chatroom'
+    ret['chatroom_addr'] = (ip, port)
+    ret['chatroom_name'] = data_recv['chatroom_name']
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+
+
+def attach(data_recv):
+
+    rand = data_recv['rand']
+    if rand == '-1':
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+    
+    for user in db:
+        if str(user['rand_num']) == data_recv['rand']:
+            # usr = user['usrname']
+            chatroom_port = user['chatroom_port']
+
+            if chatroom_port == -1:
+                msg = 'Please create-chatroom first.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+
+            if chatroom_port < 0:
+                msg = 'Please restart-chatroom first.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+
+            
+    ret = {}
+    ret['command'] = 'attach'
+    ret['port'] = chatroom_port
+    ret['msg'] = 'Welcome to the chatroom.'
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+    
+
+
+def restart_chatroom(data_recv):
+
+    rand = data_recv['rand']
+    if rand == '-1':
+        msg = 'Please login first.'
+        ret = {}
+        ret['msg'] = msg
+        ret_raw = pickle.dumps(ret)
+        return ret_raw
+    
+    for user in db:
+        if str(user['rand_num']) == data_recv['rand']:
+            # usr = user['usrname']
+            chatroom_port = user['chatroom_port']
+
+            if chatroom_port == -1:
+                msg = 'Please create-chatroom first.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+
+            if chatroom_port > 0:
+                msg = 'Your chatroom is still running.'
+                ret = {}
+                ret['msg'] = msg
+                ret_raw = pickle.dumps(ret)
+                return ret_raw
+
+            user['chatroom_port'] *= -1
+            ret_port = user['chatroom_port']
+
+    ret = {}
+    ret['msg'] = 'start to create chatroom...'
+    ret['command'] = 'restart_chatroom'
+    ret['port'] = ret_port
+    ret_raw = pickle.dumps(ret)
+    return ret_raw
+    
+
+# def handle_new_client(client, num):
+
+#     data_raw = client.recv(2048)
+#     data_recv = pickle.loads(data_raw)
+#     data_recv['port'] = PORT+num
+#     data_send = action(data_recv)
+#     client.send(data_send)
+#     client.close()
+
+#     this_sock_addr = ((HOST, PORT+num))
+#     this_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#     this_sock.bind(this_sock_addr)
+#     this_sock.listen(10)
+
+#     while True:
+#         cl, addr = this_sock.accept()
+#         client_t = threading.Thread(target=recv_and_send, args=([cl]))
+#         client_t.start()
+#         client_t.join()
+
+def listen_tcp():
+    while True:
+        client, addr = sock.accept()
+        t = threading.Thread(target=recv_and_send, args=(client, addr))
+        t.start()
+
+def listen_udp():
+    while True:
+        data_raw, addr = udp.recvfrom(1024)
+        u = threading.Thread(target=rs_udp, args=(data_raw, addr))
+        u.start()
+
+
+
+
+server_addr = ((HOST, PORT))
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.bind(server_addr)
+sock.listen(10)
+
+udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+udp.bind(server_addr)
+
+
+
+num = 1
+def main():
+    tc = threading.Thread(target=listen_tcp)
+    ud = threading.Thread(target=listen_udp)
+    tc.start()
+    ud.start()
+            
+if __name__ == "__main__":
+    main()
+
+
+

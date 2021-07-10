@@ -1,0 +1,427 @@
+#!/bin/sh
+
+""":"
+
+# Find a suitable python interpreter (adapt for your specific needs) 
+for cmd in python3 /usr/bin/python3 ; do
+   command -v > /dev/null $cmd && exec $cmd $0 "$@"
+done
+
+echo "Python not found, exiting." >2
+
+exit 2
+
+":"""
+
+import socket
+from select import select
+from random import seed
+from random import randint
+import sys
+from sys import argv
+import json
+import os
+import threading
+import pickle
+import argparse
+from datetime import datetime
+
+
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('host')
+parser.add_argument('port')
+args = parser.parse_args()
+
+host = args.host
+port = int(args.port)
+rand = '-1'
+user = '???'
+
+# print('********************************')
+# print('** Welcome to the BBS server. **')
+# print('********************************')
+send = {}
+send['command'] = 'new'
+send_raw = pickle.dumps(send)
+
+init = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+init.connect((host, port))
+init.sendall(send_raw)
+
+init_recv = pickle.loads(init.recv(1024))['msg']
+init_msg = init_recv.split('/``/`/')
+print(init_msg[0])
+# port = int(init_msg[1])
+init.close()
+
+class Chatroom():
+    def __init__(self):
+        self.msg = []
+        # self.chat = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # self.chat.bind(('', cport))
+        self.addrs = []
+        self.live = 0
+
+    
+    def last_msg(self):
+        send = self.msg[-3:] if len(self.msg) >= 3 else self.msg
+        return send
+
+    def start(self, cport):
+        self.live = 1
+        self.t = threading.Thread(target=self.server, args=(cport,))
+        self.t.start()
+        chat_mode(('', cport), user, attach=0)
+
+    def stop(self, cport):
+        if self.live == 1:
+            chat_mode(('', cport), user, attach=2332)
+            self.t.join()
+
+
+    def server(self, cport):
+        chat = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        leave_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        chat.bind(('', cport))
+        leave_tcp.bind((('', cport)))
+        leave_tcp.listen(1)
+
+        r_list = [chat, leave_tcp]
+
+        while True:
+            # print('server waiting...')
+            # sender, ad = chat.accept()
+            aa, bb, cc = select(r_list, [], [])
+
+            for s in aa:
+                if s == chat:
+                    m_raw, addr = s.recvfrom(1024)
+                else:
+                    le, ad = s.accept()
+                    m_raw = le.recv(1024)
+
+                m = pickle.loads(m_raw)
+                # print(f'server get: {m}')
+                if m['sys'] == 'join':
+                    self.addrs.append(addr)
+
+                    sys_msg = {'sys': 'msg', 'msg': f'{m["user"]} join us.\n', 'user': 'sys', 'time': datetime.now().strftime('%H:%M:%S')}
+                    sys_msg_raw = pickle.dumps(sys_msg)
+
+                    for d in self.addrs:
+                        if addr != d:
+                            chat.sendto(sys_msg_raw, d)
+                        else:
+                            l = self.last_msg()
+                            for i in l:
+                                chat.sendto(i, d)
+                        # print('server sendddd.')
+                elif m['sys'] == 'leave':
+                    sys_msg = {'sys': 'msg', 'msg': f'{m["user"]} leave us.\n', 'user': 'sys', 'time': datetime.now().strftime('%H:%M:%S')}
+                    sys_msg_raw = pickle.dumps(sys_msg)
+
+                    for d in self.addrs:
+                        chat.sendto(sys_msg_raw, d)
+                        if d == ad:
+                            self.addrs.remove(d)
+
+                    # self.addrs.remove(d)
+                    
+                elif m['sys'] == 'owner_leave':
+                    sys_msg = {'sys': 'msg', 'msg': 'the chatroom is close.\n', 'user': 'sys', 'time': datetime.now().strftime('%H:%M:%S')}
+                    sys_msg_raw = pickle.dumps(sys_msg)
+
+                    for d in self.addrs:
+                        if addr != d:
+                            chat.sendto(sys_msg_raw, d)
+                        else:
+                            # sys_msg['sys'] = 'owner_leave'
+                            # sys_msg_raw = pickle.dumps(sys_msg)
+                            chat.sendto(sys_msg_raw, d)
+
+                    self.addrs = []
+
+                elif m['sys'] == 'exit':
+                    return
+
+
+                elif m['sys'] == 'attach':
+                    self.addrs.append(addr)
+                    for d in self.addrs:
+                        if addr == d:
+                            l = self.last_msg()
+                            for i in l:
+                                chat.sendto(i, d)
+
+                elif m['sys'] == 'detach':
+                    for d in self.addrs:
+                        if addr == d:
+                            m = {'sys': 'detach', 'msg': 'badbadNP'}
+                            m_raw = pickle.dumps(m)
+                            chat.sendto(m_raw, d)
+                    self.addrs.remove(addr)
+                else:
+                    self.msg.append(m_raw)
+                    for d in self.addrs:
+                        if addr != d:
+                            chat.sendto(m_raw, d)
+
+            # print(len(self.socks))
+
+# def krecv(sock, addr):
+#     while True:
+#         recv_raw = sock.recv(1024)
+#         r = pickle.loads(recv_raw)
+#         if r['msg'] == f'{user} leave us.':
+#             break
+#         if r['sys'] == 'detach':
+#             break
+#         elif r['sys'] == 'owner_leave':
+#             break
+#         print(f'{r["user"]}[{r["time"]}] : {r["msg"]}')
+#         if r['msg'] == 'the chatroom is close.':
+#             m = {'sys': 'self'}
+#             break
+    
+def prompt() :
+    sys.stdout.write('')
+    sys.stdout.flush()
+
+
+def chat_mode(addr, huser, attach=0):
+    global chatroom
+    
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.connect(addr)
+    
+    if attach == 0:
+        j = {'sys': 'join', 'user': user, 'time': datetime.now().strftime('%H:%M:%S')}
+    elif attach == 1:
+        j = {'sys': 'attach', 'user': user, 'time': datetime.now().strftime('%H:%M:%S')}
+    else:
+        if huser == user:
+            j = {'sys': 'exit', 'user': user, 'time': datetime.now().strftime('%H:%M:%S')}
+            j_raw = pickle.dumps(j)
+            sock.sendall(j_raw)
+        return
+    j_raw = pickle.dumps(j)
+    sock.sendall(j_raw)
+
+    # keep_recv = threading.Thread(target=krecv, args=(sock, addr))
+    # keep_recv.start()
+
+    # ll = threading.Thread(target=listen_leave)
+    # ll.start()
+    print('***************************\n**​Welcome to the chatroom​**\n***************************')
+
+    while True:
+        rlist = [sys.stdin, sock]
+
+        read_list, write_list, error_list = select(rlist , [], [])
+
+        for s in read_list:
+            if s == sock:
+                recv_raw = sock.recv(1024)
+                r = pickle.loads(recv_raw)
+                # print(f'{r}')
+                if r['msg'] == f'{user} leave us.':
+                    return
+                elif r['sys'] == 'detach':
+                    return
+                elif r['sys'] == 'owner_leave':
+                    return
+                elif r['msg'] == 'the chatroom is close.\n':
+                    sys.stdout.write(f'{r["user"]}[{r["time"]}] : {r["msg"]}')
+                    print('Welcome back to BBS.')
+                    prompt()
+                    return
+                else:
+                    sys.stdout.write(f'{r["user"]}[{r["time"]}] : {r["msg"]}')
+                    prompt()
+            else:
+                s = sys.stdin.readline()
+                if s == 'leave-chatroom\n':
+                    if huser == user:
+                        se = {'sys': 'owner_leave', 'msg': 'isnt matter', 'user': user, 'time': datetime.now().strftime('%H:%M:%S')}
+                        se_raw = pickle.dumps(se)
+
+                        leave_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        leave_tcp.connect(addr)
+                        leave_tcp.sendall(se_raw)
+                        leave_tcp.close()
+
+                        prompt()
+
+                        send = {}
+                        send['command'] = 'close-chatroom'
+                        send['rand'] = rand
+                        send_raw = pickle.dumps(send)
+
+                        tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        tcp.connect((host, port))
+
+                        tcp.sendall(send_raw)
+
+                        r = tcp.recv(1024)
+                        print('Welcome back to BBS.')
+                        return
+                    else:
+                        se = {'sys': 'leave', 'msg': 'isnt matter', 'user': user, 'time': datetime.now().strftime('%H:%M:%S')}
+                        se_raw = pickle.dumps(se)
+                        leave_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        leave_tcp.connect(addr)
+                        leave_tcp.sendall(se_raw)
+                        leave_tcp.close()
+                        prompt()
+                        print('Welcome back to BBS.')
+                        return
+                elif s == 'detach\n':
+                    if huser == user:
+                        se = {'sys': 'detach', 'msg': 'isnt matter', 'user': user, 'time': datetime.now().strftime('%H:%M:%S')}
+                        se_raw = pickle.dumps(se)
+                        sock.sendall(se_raw)
+                        prompt()
+                        print('Welcome back to BBS.')
+                        return
+                    else:
+                        se = {'sys': 'msg', 'msg': s, 'user': user, 'time': datetime.now().strftime('%H:%M:%S')}
+                        se_raw = pickle.dumps(se)
+                        sock.sendall(se_raw)
+                        prompt()
+                else:
+
+                    se = {'sys': 'msg', 'msg': s, 'user': user, 'time': datetime.now().strftime('%H:%M:%S')}
+                    se_raw = pickle.dumps(se)
+                    sock.sendall(se_raw)
+                    prompt()
+                    # print('sendddd.')
+
+chatroom = Chatroom()
+
+while True:
+    udp = False
+    send = {}
+    send['rand'] = rand
+    command = input('% ')
+    command = command.replace('title ', '')
+    if command.find('content')>0 and command[0:6] == 'update':
+        update = 'c'
+    else:
+        update = 't'
+    command = command.replace('content ', '')
+    command = command.split(' --')
+    # print(command)
+    # print(command[0:7])
+    if command[0][0:7] == 'comment':
+        input_list = command[0].split(' ', 2)
+    else:
+        input_list = command[0].split()
+        for i in range(len(command)-1):
+            input_list.append(command[i+1])
+    
+    # for i in input_list:
+    #     print(i)
+
+    send['command'] = input_list[0]
+    while len(input_list) < 6:
+        input_list.append('')
+    if(input_list[0]=='register'):
+        send['usrname'] = input_list[1]
+        send['email'] = input_list[2]
+        send['password'] = input_list[3]
+    elif(input_list[0]=='login'):
+        send['usrname'] = input_list[1]
+        send['password'] = input_list[2]
+    elif(input_list[0]=='logout'):
+        a = 1
+    elif(input_list[0]=='whoami'):
+        a = 1
+    elif(input_list[0]=='list-user'):
+        send['usrname'] = input_list[1]
+        send['password'] = input_list[2]
+    elif(input_list[0]=='create-board'):
+        send['name'] = input_list[1]
+    elif(input_list[0]=='create-post'):
+        send['board-name'] = input_list[1]
+        send['title'] = input_list[2]
+        send['content'] = input_list[3]
+    elif(input_list[0]=='list-board'):
+        a = 1
+    elif(input_list[0]=='list-post'):
+        send['board-name'] = input_list[1]
+    elif(input_list[0]=='read'):
+        send['post-S/N'] = input_list[1]
+    elif(input_list[0]=='delete-post'):
+        send['post-S/N'] = input_list[1]
+    elif(input_list[0]=='update-post'):
+        send['post-S/N'] = input_list[1]
+        if update == 't':
+            send['title'] = input_list[2]
+            send['content'] = ''
+        elif update == 'c':
+            send['content'] = input_list[2]
+            send['title'] = ''
+    elif(input_list[0]=='comment'):
+        send['post-S/N'] = input_list[1]
+        send['comment'] = input_list[2]
+    elif(input_list[0]=='exit'):
+        a = 1
+
+
+    elif input_list[0] == 'create-chatroom':
+        send['port'] = input_list[1]
+    elif input_list[0] == 'list-chatroom':
+        udp = True
+    elif input_list[0] == 'join-chatroom':
+        send['chatroom_name'] = input_list[1]
+    elif input_list[0] == 'attach':
+        a = 1
+    elif input_list[0] == 'restart-chatroom':
+        a = 1
+
+    send_raw = pickle.dumps(send)
+
+    if udp == True:
+        usock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        usock.sendto(send_raw, (host, port))
+    else:
+
+        tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tcp.connect((host, port))
+
+        tcp.sendall(send_raw)
+
+    recv_raw = usock.recv(1024) if udp == True else tcp.recv(1024)
+    # print(recv_raw)
+    recv = pickle.loads(recv_raw)
+    if recv['msg'] != '':
+        msg_list = recv['msg'].split('/``/`/')
+        if(msg_list[0]=='exit'):
+            chatroom.stop(int(recv['port']))
+            break
+        print(msg_list[0])
+        if(len(msg_list)>1):
+            rand = msg_list[1]
+
+
+    try:
+        if recv['command'] == 'create_chatroom':
+            chatroom.start(int(recv['port']))
+        elif recv['command'] == 'join_chatroom':
+            chat_mode(recv['chatroom_addr'], recv['chatroom_name'], attach=0)
+        elif recv['command'] == 'attach':
+            chat_mode(('', recv['port']), user, attach=1)
+        elif recv['command'] == 'restart_chatroom':
+            chat_mode(('', recv['port']), user, attach=0)
+        elif recv['command'] == 'login':
+            user = recv['username']
+        # elif recv['command'] == 'exit':
+        #     chatroom.stop(int(recv['port']))
+    except KeyError as e:
+        a = 1
+
+
+    usock.close() if udp == True else tcp.close()
+
